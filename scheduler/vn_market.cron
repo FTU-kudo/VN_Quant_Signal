@@ -1,0 +1,5 @@
+# VN Quant Signal — Daily Pipeline
+# Chạy 15:20 ICT = 08:20 UTC, Thứ 2 – Thứ 6
+# Cài: crontab -e → paste dòng dưới (thay /path/to bằng đường dẫn thật)
+
+20 08 * * 1-5 /path/to/.venv/bin/python /path/to/run_daily.py >> /path/to/logs/cron.log 2>&1

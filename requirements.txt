@@ -1,0 +1,20 @@
+# ── Core data stack ───────────────────────────────────────────────────────────
+pandas>=2.1.0
+numpy>=1.26.0
+pyarrow>=14.0.0          # parquet read/write backend
+
+# ── Vietnamese market data ────────────────────────────────────────────────────
+# Pin to v3.x — API changed significantly from v2 (all examples target v3)
+vnstock>=0.3.0
+
+# ── Technical indicators ──────────────────────────────────────────────────────
+pandas-ta>=0.3.14b        # MA, RSI, MACD, BB, ADX, Ichimoku (Steps 3–5)
+
+# ── Scheduling / utilities ────────────────────────────────────────────────────
+python-dotenv>=1.0.0      # .env for secrets (SMTP credentials, API keys)
+
+# ── Email (Step 6) ────────────────────────────────────────────────────────────
+# stdlib smtplib is sufficient; no extra package needed
+
+# ── Optional: faster parquet backend ─────────────────────────────────────────
+# fastparquet>=2023.10.1  # uncomment if pyarrow memory overhead is a concern
