@@ -220,7 +220,7 @@ def send_email_report(html_content: str, subject: Optional[str] = None) -> bool:
             server.sendmail(SMTP_USER, REPORT_RECIPIENTS, msg.as_string())
         with log_path.open("a", encoding="utf-8") as f:
             f.write(f"{datetime.now()} | SUCCESS | {subject}\n")
-        print("[SUCCESS] Email gửi thành công đến tất cả người nhận")
+        print("✅ Email gửi thành công đến tất cả người nhận")
         return True
     except Exception as e:
         with log_path.open("a", encoding="utf-8") as f:
