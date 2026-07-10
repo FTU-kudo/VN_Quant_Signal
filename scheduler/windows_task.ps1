@@ -27,12 +27,17 @@ $Settings = New-ScheduledTaskSettingsSet `
     -RunOnlyIfNetworkAvailable `
     -StartWhenAvailable
 
+$Principal = New-ScheduledTaskPrincipal `
+    -UserId   $env:USERNAME `
+    -LogonType S4U `
+    -RunLevel Highest
+
 Register-ScheduledTask `
-    -TaskName "VN Quant Signal Daily Report" `
-    -Action   $Action `
-    -Trigger  $Trigger `
-    -Settings $Settings `
-    -RunLevel Highest `
+    -TaskName  "VN Quant Signal Daily Report" `
+    -Action    $Action `
+    -Trigger   $Trigger `
+    -Settings  $Settings `
+    -Principal $Principal `
     -Force
 
-Write-Host "[OK] Task Scheduler updated successfully -- runs background at 16:00 Mon-Fri via pythonw.exe"
+Write-Host "[OK] Task Scheduler updated successfully -- runs completely hidden (LogonType S4U) at 16:00 Mon-Fri"

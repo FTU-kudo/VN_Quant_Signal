@@ -27,17 +27,11 @@ $Settings = New-ScheduledTaskSettingsSet `
     -RunOnlyIfNetworkAvailable `
     -StartWhenAvailable
 
-$Principal = New-ScheduledTaskPrincipal `
-    -UserId   $env:USERNAME `
-    -LogonType S4U `
-    -RunLevel Highest
+try {
+    $Principal = New-ScheduledTaskPrincipal -UserId $env:USERNAME -LogonType S4U -RunLevel Highest
+    Register-ScheduledTask -TaskName "VN_Quant_Weekly_Review" -Action $Action -Trigger $Trigger -Settings $Settings -Principal $Principal -Force -ErrorAction Stop
+} catch {
+    Register-ScheduledTask -TaskName "VN_Quant_Weekly_Review" -Action $Action -Trigger $Trigger -Settings $Settings -Force
+}
 
-Register-ScheduledTask `
-    -TaskName  "VN_Quant_Weekly_Review" `
-    -Action    $Action `
-    -Trigger   $Trigger `
-    -Settings  $Settings `
-    -Principal $Principal `
-    -Force
-
-Write-Host "✅ Weekly review đã đăng ký — chạy ngầm ẩn thứ 6 lúc 16:30"
+Write-Host "[OK] Weekly review task registered successfully -- runs Friday at 16:30"
