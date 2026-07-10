@@ -1,0 +1,43 @@
+# Run once as Admin to register Task Scheduler for Weekly Review (Friday 16:30)
+$ProjectRoot = Split-Path -Parent $PSScriptRoot
+$PythonExe   = Join-Path $ProjectRoot ".venv\Scripts\pythonw.exe"
+if (-not (Test-Path $PythonExe)) {
+    $PythonCmd = Get-Command pythonw.exe -ErrorAction SilentlyContinue
+    if ($PythonCmd) {
+        $PythonExe = $PythonCmd.Source
+    } else {
+        $PythonExe = "pythonw.exe"
+    }
+}
+$ScriptPath  = Join-Path $ProjectRoot "run_weekly_review.py"
+
+$Action  = New-ScheduledTaskAction `
+    -Execute $PythonExe `
+    -Argument $ScriptPath `
+    -WorkingDirectory $ProjectRoot
+
+# Trigger: 16:30 ICT, Friday only
+$Trigger = New-ScheduledTaskTrigger `
+    -Weekly `
+    -DaysOfWeek Friday `
+    -At "16:30"
+
+$Settings = New-ScheduledTaskSettingsSet `
+    -ExecutionTimeLimit (New-TimeSpan -Hours 1) `
+    -RunOnlyIfNetworkAvailable `
+    -StartWhenAvailable
+
+$Principal = New-ScheduledTaskPrincipal `
+    -UserId   $env:USERNAME `
+    -LogonType S4U `
+    -RunLevel Highest
+
+Register-ScheduledTask `
+    -TaskName  "VN_Quant_Weekly_Review" `
+    -Action    $Action `
+    -Trigger   $Trigger `
+    -Settings  $Settings `
+    -Principal $Principal `
+    -Force
+
+Write-Host "✅ Weekly review đã đăng ký — chạy ngầm ẩn thứ 6 lúc 16:30"
