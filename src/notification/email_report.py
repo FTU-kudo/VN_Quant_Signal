@@ -194,36 +194,61 @@ def generate_html_report(top10_df: pd.DataFrame) -> str:
 
 
 def send_email_report(html_content: str, subject: Optional[str] = None) -> bool:
-    """Gửi HTML email qua SMTP. Credentials từ config.settings / .env"""
-    from config.settings import SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASS, REPORT_RECIPIENTS
+    """Gửi HTML email qua SMTP. Credentials đọc động từ môi trường / config."""
+    import os
+    from config.settings import SMTP_HOST as CFG_HOST, SMTP_PORT as CFG_PORT, SMTP_USER as CFG_USER, SMTP_PASS as CFG_PASS, REPORT_RECIPIENTS as CFG_RECIPIENTS
+    from src.utils.security import redact_sensitive_text
 
-    if not SMTP_USER or not REPORT_RECIPIENTS:
-        print("⚠️  SMTP chưa cấu hình trong .env — skip email")
+    smtp_host = os.getenv("SMTP_HOST", CFG_HOST)
+    smtp_port = int(os.getenv("SMTP_PORT", str(CFG_PORT)))
+    smtp_user = os.getenv("SMTP_USER", CFG_USER).strip()
+    smtp_pass = os.getenv("SMTP_PASS", CFG_PASS).strip()
+
+    recipients_str = os.getenv("REPORT_RECIPIENTS", "")
+    recipients = [r.strip() for r in recipients_str.split(",") if r.strip()] if recipients_str else CFG_RECIPIENTS
+
+    if not smtp_user or not recipients:
+        print("⚠️  SMTP chưa cấu hình đầy đủ trong .env — skip email")
         return False
 
     subject = subject or f"[VN Signal] Top 10 — {date.today():%d/%m/%Y}"
 
     msg = MIMEMultipart("alternative")
     msg["Subject"] = subject
-    msg["From"]    = SMTP_USER
-    msg["To"]      = ", ".join(REPORT_RECIPIENTS)
+    msg["From"]    = smtp_user
+    msg["To"]      = ", ".join(recipients)
     msg.attach(MIMEText(html_content, "html", "utf-8"))
 
     LOG_DIR.mkdir(parents=True, exist_ok=True)
     log_path = LOG_DIR / "email_log.txt"
 
     try:
-        with smtplib.SMTP(SMTP_HOST, SMTP_PORT, timeout=10) as server:
-            server.ehlo()
-            server.starttls()
-            server.login(SMTP_USER, SMTP_PASS)
-            server.sendmail(SMTP_USER, REPORT_RECIPIENTS, msg.as_string())
+        if smtp_port == 465:
+            # Chế độ SSL trực tiếp (Port 465)
+            with smtplib.SMTP_SSL(smtp_host, smtp_port, timeout=15) as server:
+                if smtp_pass:
+                    server.login(smtp_user, smtp_pass)
+                server.sendmail(smtp_user, recipients, msg.as_string())
+        else:
+            # Chế độ STARTTLS (Port 587) hoặc Relay không mã hóa (Port 25/1025)
+            with smtplib.SMTP(smtp_host, smtp_port, timeout=15) as server:
+                server.ehlo()
+                if server.has_extn("STARTTLS") or smtp_port == 587:
+                    server.starttls()
+                    server.ehlo()
+                if smtp_pass:
+                    server.login(smtp_user, smtp_pass)
+                server.sendmail(smtp_user, recipients, msg.as_string())
+
         with log_path.open("a", encoding="utf-8") as f:
             f.write(f"{datetime.now()} | SUCCESS | {subject}\n")
         print("✅ Email gửi thành công")
         return True
     except Exception as e:
+        safe_error = redact_sensitive_text(str(e))
         with log_path.open("a", encoding="utf-8") as f:
-            f.write(f"{datetime.now()} | FAILED | {e}\n")
-        print(f"[FAILED] Email thất bại: {e}")
+            f.write(f"{datetime.now()} | FAILED | {safe_error}\n")
+        print(f"[FAILED] Email thất bại: {safe_error}")
         return False
+
+

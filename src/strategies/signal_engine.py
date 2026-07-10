@@ -178,7 +178,7 @@ def apply_all_strategies(df: pd.DataFrame, regime_filter: bool = True) -> pd.Dat
             regime_map = dict(zip(pd.to_datetime(regime_df["date"]).dt.date, regime_df["regime"]))
             out["regime"] = out["time"].dt.date.map(lambda d: regime_map.get(d, "UNKNOWN"))
 
-            bull_mask = out["regime"].isin(["BULL", "UNKNOWN"])
+            bull_mask = out["regime"] == "BULL"
             bear_mask = out["regime"] == "BEAR"
 
             # SIG_GOLDEN chỉ fire trong BULL (cần xu hướng tăng mạnh của VNINDEX)
@@ -218,6 +218,23 @@ def score_tickers(df_latest: pd.DataFrame) -> pd.DataFrame:
     Chỉ giữ tickers có score > 0 trong Top 10.
     """
     df = df_latest.copy()
+
+    # Load regime HÔM NAY và lọc trực tiếp trên snapshot mới nhất
+    regime_path = PROC_DIR / 'market_regime.parquet'
+    if regime_path.exists():
+        regime_df = pd.read_parquet(regime_path)
+        today_regime = regime_df.iloc[-1]['regime']
+
+        if today_regime == 'BEAR':
+            for _col in ['SIG_GOLDEN', 'SIG_ICHIMOKU', 'SIG_SMC', 'SIG_OB']:
+                if _col in df.columns:
+                    df[_col] = False
+        elif today_regime == 'SIDEWAY':
+            # SIDEWAY: chỉ giữ SIG_SMC (reversal strategy), tắt trend strategies
+            for _col in ['SIG_GOLDEN', 'SIG_ICHIMOKU', 'SIG_OB']:
+                if _col in df.columns:
+                    df[_col] = False
+
     df['score'] = 0.0
     
     # Validated signals

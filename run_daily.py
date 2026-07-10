@@ -28,7 +28,7 @@ def is_trading_day() -> bool:
     return date.today().weekday() < 5  # 0=Mon, 4=Fri
 
 
-def run(dry_run: bool = False, send_test: bool = False):
+def run(dry_run: bool = False, send_test: bool = False, full_scan: bool = False):
     if not is_trading_day():
         log.info("Hôm nay không phải ngày giao dịch — skip.")
         return
@@ -45,37 +45,62 @@ def run(dry_run: bool = False, send_test: bool = False):
     )
 
     from src.data.ingestion import run_ingestion
-    if days_since_filter > 7 or not filtered_path.exists():
-        log.info("Step 1 & 2: Full ingestion & Rebuild filter (>7 ngày)...")
+
+    # Quét toàn bộ ~1,700 mã vào Thứ Hai hàng tuần (weekday=0) hoặc khi truyền cờ --full-scan / chưa có bộ lọc
+    is_monday_weekly = (date.today().weekday() == 0 and days_since_filter >= 5)
+    should_full_scan = full_scan or is_monday_weekly or not filtered_path.exists()
+
+    if should_full_scan:
+        log.info("Step 1 & 2: Quét toàn bộ ~1,700 mã trên HOSE, HNX, UPCOM & cập nhật bộ lọc (Thứ Hai hàng tuần / Full scan)...")
         run_ingestion()
         from src.data.filters import run_filter_pipeline
         run_filter_pipeline()
     else:
-        log.info("Step 1: Targeted delta ingestion cho universe đã lọc (chạy %.1f ngày trước)...", days_since_filter)
+        log.info("Step 1: Quét nhanh Incremental cho danh sách lọc (Tiết kiệm RAM & thời gian — cập nhật %.1f ngày trước)...", days_since_filter)
         filtered_tickers = _pd.read_parquet(filtered_path)['ticker'].unique().tolist()
         run_ingestion(tickers=filtered_tickers)
         log.info("Step 2: Skip filter")
 
-    # Step 3: Feature Engineering — INCREMENTAL (chỉ 260 bars × 159 tickers)
+
+    # Step 3: Feature Engineering — INCREMENTAL
     log.info("Step 3: Feature Engineering (incremental)...")
     from src.features.indicators import run_feature_engineering
     snapshot = run_feature_engineering(mode='incremental', lookback_bars=260)
 
     # Step 4: Signal Generation từ snapshot
+    log.info("Updating market regime...")
+    from src.features.market_regime import compute_market_regime
+    compute_market_regime(force_recompute=True)  # luôn cập nhật mới
+
     log.info("Step 4: Signal Generation...")
-    from src.strategies.signal_engine import score_tickers, apply_all_strategies, add_position_sizing
-    snapshot_with_signals = apply_all_strategies(snapshot)
-    top10 = score_tickers(
-        snapshot_with_signals.groupby('ticker', observed=True).last().reset_index()
-    )
-    top10 = add_position_sizing(top10)
-    top10.to_parquet(PROC_DIR / "top10_today.parquet", index=False)
+    from src.strategies.signal_engine import run_signal_generation
+    full_df = _pd.read_parquet(PROC_DIR / 'universe_features.parquet')
+    top10 = run_signal_generation(full_df)
 
-    log.info("Top 10 hôm nay:\n%s",
-             top10[['ticker','score','signals_fired','close','volume','RSI_14','ADTV_tỷ']].to_string()
-             if all(c in top10.columns for c in ['volume','ADTV_tỷ']) else top10.to_string())
+    if len(top10) == 0:
+        # Gửi thông báo ngắn thay vì email rỗng
+        regime = _pd.read_parquet(
+            PROC_DIR / 'market_regime.parquet'
+        ).iloc[-1]['regime']
 
-    # Step 5: Email & HTML Report
+        no_signal_msg = (
+            f"📊 VN Quant Signal — {date.today():%d/%m/%Y}\n"
+            f"🔴 Thị trường: {regime}\n"
+            f"⏸ Không có tín hiệu hôm nay\n"
+            f"Hệ thống đang bảo vệ vốn — chờ thị trường hồi phục."
+        )
+        from src.notification.telegram_alert import send_telegram_message
+        if not dry_run:
+            send_telegram_message(no_signal_msg)
+        else:
+            log.info("[DRY RUN] Telegram No-Signal:\n%s", no_signal_msg)
+        log.info("Không có signal — đã gửi thông báo BEAR")
+        log.info("=== DONE in %.1f giây ===", time.perf_counter() - t0)
+        return   # Không gửi email HTML
+
+    log.info("Top 10 hôm nay:\n%s", top10[['ticker', 'score', 'signals_fired', 'close', 'volume', 'RSI_14', 'ADTV_tỷ']].head(5))
+
+    # Step 5 & 6: Notification & Report
     from src.notification.email_report import generate_html_report, send_email_report
     html = generate_html_report(top10)
     LOG_DIR.mkdir(parents=True, exist_ok=True)
@@ -100,8 +125,9 @@ def run(dry_run: bool = False, send_test: bool = False):
 
 
 if __name__ == "__main__":
-    p = argparse.ArgumentParser()
-    p.add_argument("--dry-run", action="store_true")
-    p.add_argument("--send-test", action="store_true")
+    p = argparse.ArgumentParser(description="VN Quant Signal Daily Pipeline")
+    p.add_argument("--dry-run", action="store_true", help="Chạy pipeline nhưng không gửi thông báo")
+    p.add_argument("--send-test", action="store_true", help="Gửi test thông báo")
+    p.add_argument("--full-scan", action="store_true", help="Quét toàn bộ ~1,700 mã trên HOSE, HNX, UPCOM và tái sàng lọc bộ lọc")
     args = p.parse_args()
-    run(dry_run=args.dry_run, send_test=args.send_test)
+    run(dry_run=args.dry_run, send_test=args.send_test, full_scan=args.full_scan)

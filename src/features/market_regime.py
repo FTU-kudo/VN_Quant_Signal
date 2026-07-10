@@ -26,7 +26,8 @@ log = logging.getLogger(__name__)
 def compute_market_regime(
     start: str = HISTORY_START,
     end: Optional[str] = None,
-    save_parquet: bool = True
+    save_parquet: bool = True,
+    force_recompute: bool = True
 ) -> pd.DataFrame:
     """
     Tính toán và phân loại Market Regime (BULL / SIDEWAY / BEAR) từ VNINDEX.

@@ -12,40 +12,73 @@ from typing import Optional
 import pandas as pd
 from pathlib import Path
 from dotenv import load_dotenv
-
-load_dotenv()
-
-TELEGRAM_TOKEN   = os.getenv('TELEGRAM_TOKEN', '')
-TELEGRAM_CHAT_ID = os.getenv('TELEGRAM_CHAT_ID', '')
-TELEGRAM_API     = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}"
+from src.utils.security import redact_sensitive_text
 
 
-def send_telegram_message(text: str) -> bool:
-    """Gửi text message qua Telegram Bot API."""
-    if not TELEGRAM_TOKEN or not TELEGRAM_CHAT_ID:
+import time
+
+
+def send_telegram_message(text: str, max_retries: int = 3) -> bool:
+    """
+    Gửi text message qua Telegram Bot API.
+    Hỗ trợ tự động chia nhỏ tin nhắn (>4000 ký tự) và retry khi gặp lỗi mạng/429.
+    """
+    load_dotenv()
+    token   = os.getenv('TELEGRAM_TOKEN', '').strip()
+    chat_id = os.getenv('TELEGRAM_CHAT_ID', '').strip()
+
+    if not token or not chat_id:
         print("⚠️  Telegram chưa cấu hình trong .env")
         return False
-    try:
-        resp = requests.post(
-            f"{TELEGRAM_API}/sendMessage",
-            json={
-                'chat_id'   : TELEGRAM_CHAT_ID,
-                'text'      : text,
-                'parse_mode': 'HTML',
-            },
-            timeout=10,
-        )
-        resp.raise_for_status()
+
+    api_url = f"https://api.telegram.org/bot{token}/sendMessage"
+
+    # Telegram giới hạn tối đa 4096 ký tự/tin nhắn -> cắt chunk 4000 ký tự
+    chunks = []
+    current_chunk = ""
+    for line in text.splitlines():
+        if len(current_chunk) + len(line) + 1 > 4000:
+            chunks.append(current_chunk)
+            current_chunk = line
+        else:
+            current_chunk = f"{current_chunk}\n{line}" if current_chunk else line
+    if current_chunk:
+        chunks.append(current_chunk)
+
+    all_success = True
+    for idx, chunk in enumerate(chunks):
+        success = False
+        for attempt in range(1, max_retries + 1):
+            try:
+                resp = requests.post(
+                    api_url,
+                    json={
+                        'chat_id'   : chat_id,
+                        'text'      : chunk,
+                        'parse_mode': 'HTML',
+                    },
+                    timeout=10,
+                )
+                resp.raise_for_status()
+                success = True
+                break
+            except Exception as e:
+                safe_error = redact_sensitive_text(str(e))
+                if attempt < max_retries:
+                    time.sleep(2 * attempt)
+                else:
+                    print(f"❌ Telegram thất bại (chunk {idx+1}/{len(chunks)}): {safe_error}")
+                    Path('logs').mkdir(parents=True, exist_ok=True)
+                    with Path('logs/telegram_log.txt').open('a', encoding='utf-8') as f:
+                        f.write(f"{date.today()} | FAILED | {safe_error}\n")
+        if not success:
+            all_success = False
+
+    if all_success:
         print("✅ Telegram gửi thành công")
-        return True
-    except Exception as e:
-        print(f"❌ Telegram thất bại: {e}")
-        # Ghi log
-        Path('logs').mkdir(parents=True, exist_ok=True)
-        Path('logs/telegram_log.txt').open('a', encoding='utf-8').write(
-            f"{date.today()} | FAILED | {e}\n"
-        )
-        return False
+    return all_success
+
+
 
 
 def format_telegram_report(top10_df: pd.DataFrame) -> str:

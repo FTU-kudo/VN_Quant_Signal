@@ -105,8 +105,8 @@ RETRY_MAX_DELAY  = 60.0   # hard ceiling on sleep between retries
 # │                             │                          │ loss years + low price). Also, the 10-pip tick size        │
 # │                             │                          │ (500 VND on HOSE) means bid-ask spread is ≥10% of price.  │
 # ├─────────────────────────────┼──────────────────────────┼────────────────────────────────────────────────────────────┤
-# │ Liquidity (avg daily value) │ avg_value_20d            │ 100M VND (~$4,000) daily turnover is the approximate       │
-# │                             │ ≥ 100,000,000 VND        │ threshold where a 10M VND order can be filled at <0.5%    │
+# │ Liquidity (avg daily value) │ avg_value_20d            │ 5B VND daily turnover is the strict institutional          │
+# │                             │ ≥ 5,000,000,000 VND      │ threshold where orders can be filled at minimal            │
 # │                             │                          │ market impact. Below this, slippage destroys alpha.        │
 # │                             │                          │ Value-based (close×volume) is better than raw volume:      │
 # │                             │                          │ a 10,000-VND stock trading 1M shares ≠ a 100,000-VND      │

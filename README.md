@@ -8,7 +8,7 @@ Hệ thống phân tích định lượng và tạo tín hiệu giao dịch ch�
 
 1. **Bộ lọc chất lượng & thanh khoản (Quality & Liquidity Filters)**:
    - Loại bỏ các cổ phiếu thanh khoản thấp, giá dưới 5,000 VND hoặc giao dịch ngắt quãng.
-   - Tính toán theo giá trị giao dịch thực tế (`ADTV_20d`).
+   - Tính toán theo giá trị giao dịch thực tế (`ADTV_20d ≥ 5 tỷ VND` - cố định).
 2. **5 Chiến lược Định lượng (Quantitative Strategies)**:
    - **ICHIMOKU_TREND**: Theo dấu xu hướng mây Kumo kết hợp xác nhận phá vỡ cấu trúc đỉnh (`BOS_BULL`) và động lượng `ADX > 25`.
    - **SMC_REVERSAL**: Nhận diện vùng Order Block (OB) và Change of Character (`CHOCH`).
