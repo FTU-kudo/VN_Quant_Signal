@@ -1,9 +1,6 @@
 name: VN Quant Daily Pipeline
 
 on:
-  schedule:
-    # 09:00 UTC = 16:00 giờ Việt Nam (UTC+7) từ Thứ 2 đến Thứ 6
-    - cron: '0 9 * * 1-5'
   workflow_dispatch: # Cho phép kích hoạt thủ công trên giao diện GitHub Actions
 
 jobs:
