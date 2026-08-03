@@ -28,16 +28,50 @@ def is_trading_day() -> bool:
     return date.today().weekday() < 5  # 0=Mon, 4=Fri
 
 
-def run(dry_run: bool = False, send_test: bool = False, full_scan: bool = False):
+def run(dry_run: bool = False, send_test: bool = False, full_scan: bool = False, analyze_only: bool = False, notify_only: bool = False):
     if not is_trading_day():
         log.info("Hôm nay không phải ngày giao dịch — skip.")
         return
 
     t0 = time.perf_counter()
+    import pandas as _pd
+
+    if notify_only:
+        log.info("=== VN Quant Daily Pipeline: NOTIFY ONLY ===")
+        top10_path = PROC_DIR / 'top10_today.parquet'
+        regime_path = PROC_DIR / 'market_regime.parquet'
+        
+        regime = _pd.read_parquet(regime_path).iloc[-1]['regime'] if regime_path.exists() else "UNKNOWN"
+        emoji_map = {"BULL": "🟢", "SIDEWAY": "🟡", "BEAR": "🔴"}
+        emoji = emoji_map.get(regime, "⚪")
+
+        from src.notification.telegram_alert import send_telegram_message, send_daily_alert
+        if not top10_path.exists():
+            no_signal_msg = (
+                f"📊 VN Quant Signal — {date.today():%d/%m/%Y}\n"
+                f"{emoji} Thị trường: {regime}\n"
+                f"⏸ Không có tín hiệu hôm nay\n"
+                f"Hệ thống đang bảo vệ vốn — chờ thị trường hồi phục."
+            )
+            if not dry_run:
+                send_telegram_message(no_signal_msg)
+            else:
+                log.info("[DRY RUN] Telegram No-Signal:\n%s", no_signal_msg)
+            log.info("Không có signal — đã gửi thông báo BEAR")
+            return
+            
+        top10 = _pd.read_parquet(top10_path)
+        if len(top10) > 0:
+            if not dry_run:
+                send_daily_alert(top10)
+            else:
+                send_daily_alert(top10, dry_run=True)
+            log.info("Đã gửi Telegram Top %d", len(top10))
+        return
+
     log.info("=== VN Quant Daily Pipeline START ===")
 
     import time as _time
-    import pandas as _pd
     filtered_path = PROC_DIR / 'universe_filtered.parquet'
     days_since_filter = (
         (_time.time() - filtered_path.stat().st_mtime) / 86400
@@ -88,31 +122,11 @@ def run(dry_run: bool = False, send_test: bool = False, full_scan: bool = False)
 
     top10 = run_signal_generation(full_df)
 
+    top10_path = PROC_DIR / 'top10_today.parquet'
     if len(top10) == 0:
-        # Gửi thông báo ngắn thay vì email rỗng
-        regime = _pd.read_parquet(
-            PROC_DIR / 'market_regime.parquet'
-        ).iloc[-1]['regime']
-
-        # Use the same emoji mapping as format_telegram_report to avoid
-        # mismatched icon/text (previously the message hardcoded a red
-        # dot which produced "🔴 Thị trường: BULL").
-        emoji_map = {"BULL": "🟢", "SIDEWAY": "🟡", "BEAR": "🔴"}
-        emoji = emoji_map.get(regime, "⚪")
-
-        no_signal_msg = (
-            f"📊 VN Quant Signal — {date.today():%d/%m/%Y}\n"
-            f"{emoji} Thị trường: {regime}\n"
-            f"⏸ Không có tín hiệu hôm nay\n"
-            f"Hệ thống đang bảo vệ vốn — chờ thị trường hồi phục."
-        )
-        from src.notification.telegram_alert import send_telegram_message
-        if not dry_run:
-            send_telegram_message(no_signal_msg)
-        else:
-            log.info("[DRY RUN] Telegram No-Signal:\n%s", no_signal_msg)
-        log.info("Không có signal — đã gửi thông báo BEAR")
-
+        if top10_path.exists():
+            top10_path.unlink()
+        
         try:
             from track_signals import record_and_update_signals
             from src.tracking.auto_updater import sync_to_excel
@@ -125,31 +139,12 @@ def run(dry_run: bool = False, send_test: bool = False, full_scan: bool = False)
         except Exception as e:
             log.warning("Could not sync live signal tracker to Excel: %s", e)
 
-        log.info("=== DONE in %.1f giây ===", time.perf_counter() - t0)
-        return   # Không gửi email HTML
+        log.info("=== DONE ANALYSIS in %.1f giây ===", time.perf_counter() - t0)
+        return
 
     log.info("Top 10 hôm nay:\n%s", top10[['ticker', 'score', 'signals_fired', 'close', 'volume', 'RSI_14', 'ADTV_tỷ']].head(5))
-
-    # Step 5 & 6: Notification & Report
-    from src.notification.email_report import generate_html_report, send_email_report
-    html = generate_html_report(top10)
-    LOG_DIR.mkdir(parents=True, exist_ok=True)
-    latest_file = LOG_DIR / "latest_report.html"
-    dated_file  = LOG_DIR / f"report_{datetime.now().strftime('%Y%m%d')}.html"
-    latest_file.write_text(html, encoding="utf-8")
-    dated_file.write_text(html, encoding="utf-8")
-    log.info("Đã tạo báo cáo HTML tại %s và %s", latest_file, dated_file)
-
-    if not dry_run:
-        send_email_report(html)
-    else:
-        log.info("[DRY RUN] Email skipped — xem logs/latest_report.html")
-
-    from src.notification.telegram_alert import send_daily_alert
-    if not dry_run:
-        send_daily_alert(top10)
-    else:
-        send_daily_alert(top10, dry_run=True)
+    top10.to_parquet(top10_path)
+    log.info("Đã lưu kết quả vào %s", top10_path)
 
     try:
         from track_signals import record_and_update_signals
@@ -163,7 +158,7 @@ def run(dry_run: bool = False, send_test: bool = False, full_scan: bool = False)
     except Exception as e:
         log.warning("Could not sync live signal tracker to Excel: %s", e)
 
-    log.info("=== DONE in %.1f giây ===", time.perf_counter() - t0)
+    log.info("=== DONE ANALYSIS in %.1f giây ===", time.perf_counter() - t0)
 
 
 
@@ -172,5 +167,7 @@ if __name__ == "__main__":
     p.add_argument("--dry-run", action="store_true", help="Chạy pipeline nhưng không gửi thông báo")
     p.add_argument("--send-test", action="store_true", help="Gửi test thông báo")
     p.add_argument("--full-scan", action="store_true", help="Quét toàn bộ ~1,700 mã trên HOSE, HNX, UPCOM và tái sàng lọc bộ lọc")
+    p.add_argument("--analyze-only", action="store_true", help="Chỉ phân tích, lưu kết quả, không thông báo")
+    p.add_argument("--notify-only", action="store_true", help="Chỉ đọc kết quả và gửi thông báo Telegram")
     args = p.parse_args()
-    run(dry_run=args.dry_run, send_test=args.send_test, full_scan=args.full_scan)
+    run(dry_run=args.dry_run, send_test=args.send_test, full_scan=args.full_scan, analyze_only=args.analyze_only, notify_only=args.notify_only)
