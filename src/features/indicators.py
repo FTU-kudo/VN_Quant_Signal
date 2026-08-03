@@ -494,9 +494,28 @@ def run_feature_engineering(
         )
         print(f"Snapshot saved: {len(snapshot)} tickers")
         log.info("Snapshot saved to daily_snapshot.parquet: %d tickers", len(snapshot))
+
+        # Đồng bộ cập nhật universe_features.parquet để tránh lỗi stale data khi đọc lại
+        if out_path.exists():
+            try:
+                df_old = pd.read_parquet(out_path)
+                min_new_time = df['time'].min()
+                df_combined = pd.concat(
+                    [df_old[df_old['time'] < min_new_time], df],
+                    ignore_index=True
+                )
+                df_combined.to_parquet(out_path, compression="snappy", index=False)
+                log.info("Updated universe_features.parquet incrementally. Shape: %s, Max date: %s",
+                         df_combined.shape, df_combined['time'].max())
+            except Exception as e:
+                log.warning("Could not merge universe_features.parquet (%s), saving incremental df directly", e)
+                df.to_parquet(out_path, compression="snappy", index=False)
+        else:
+            df.to_parquet(out_path, compression="snappy", index=False)
         return df
     else:
         log.info("Saving feature dataset to %s...", out_path)
         df.to_parquet(out_path, compression="snappy", index=False)
         log.info("Feature engineering complete. Output shape: %s", df.shape)
         return df
+

@@ -393,10 +393,11 @@ def run_signal_generation(
     df_signals.to_parquet(out_signals_path, index=False)
     log.info("Saved full signal history to %s", out_signals_path)
 
-    # Latest bar per ticker
+    # Latest bar per ticker (chỉ lấy đúng ngày giao dịch mới nhất latest_date, tránh lấy mã đã dừng giao dịch hoặc stale bar)
     latest_date = df_signals["time"].max()
     log.info("Extracting latest snapshot for date: %s", latest_date)
-    df_latest = df_signals.sort_values("time").groupby("ticker", observed=True).last().reset_index()
+    df_latest = df_signals[df_signals["time"] == latest_date].copy().reset_index(drop=True)
+
 
     # Score and select Top 10
     ranked = score_tickers(df_latest)

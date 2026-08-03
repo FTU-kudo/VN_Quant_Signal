@@ -65,7 +65,11 @@ def run(dry_run: bool = False, send_test: bool = False, full_scan: bool = False)
     # Step 3: Feature Engineering — INCREMENTAL
     log.info("Step 3: Feature Engineering (incremental)...")
     from src.features.indicators import run_feature_engineering
-    snapshot = run_feature_engineering(mode='incremental', lookback_bars=260)
+    # Run feature engineering in incremental mode and keep the in-memory
+    # features dataframe produced for the most-recent bars. Previously the
+    # pipeline read `universe_features.parquet` (which is only updated on
+    # full runs) causing stale prices to be used for scoring/signals.
+    features_df = run_feature_engineering(mode='incremental', lookback_bars=260)
 
     # Step 4: Signal Generation từ snapshot
     log.info("Updating market regime...")
@@ -74,7 +78,14 @@ def run(dry_run: bool = False, send_test: bool = False, full_scan: bool = False)
 
     log.info("Step 4: Signal Generation...")
     from src.strategies.signal_engine import run_signal_generation
-    full_df = _pd.read_parquet(PROC_DIR / 'universe_features.parquet')
+    # Prefer the freshly computed incremental features (in-memory) so that
+    # today's bars are used. Fall back to the persisted `universe_features.parquet`
+    # only if the incremental run returned None/empty for some reason.
+    if features_df is not None and not features_df.empty:
+        full_df = features_df
+    else:
+        full_df = _pd.read_parquet(PROC_DIR / 'universe_features.parquet')
+
     top10 = run_signal_generation(full_df)
 
     if len(top10) == 0:
@@ -83,9 +94,15 @@ def run(dry_run: bool = False, send_test: bool = False, full_scan: bool = False)
             PROC_DIR / 'market_regime.parquet'
         ).iloc[-1]['regime']
 
+        # Use the same emoji mapping as format_telegram_report to avoid
+        # mismatched icon/text (previously the message hardcoded a red
+        # dot which produced "🔴 Thị trường: BULL").
+        emoji_map = {"BULL": "🟢", "SIDEWAY": "🟡", "BEAR": "🔴"}
+        emoji = emoji_map.get(regime, "⚪")
+
         no_signal_msg = (
             f"📊 VN Quant Signal — {date.today():%d/%m/%Y}\n"
-            f"🔴 Thị trường: {regime}\n"
+            f"{emoji} Thị trường: {regime}\n"
             f"⏸ Không có tín hiệu hôm nay\n"
             f"Hệ thống đang bảo vệ vốn — chờ thị trường hồi phục."
         )
@@ -95,6 +112,19 @@ def run(dry_run: bool = False, send_test: bool = False, full_scan: bool = False)
         else:
             log.info("[DRY RUN] Telegram No-Signal:\n%s", no_signal_msg)
         log.info("Không có signal — đã gửi thông báo BEAR")
+
+        try:
+            from track_signals import record_and_update_signals
+            from src.tracking.auto_updater import sync_to_excel
+            log.info("Updating live signal tracker...")
+            record_and_update_signals()
+            sync_to_excel(
+                csv_path=PROC_DIR / 'live_signal_tracker.csv',
+                xlsx_path=Path('journal/trade_log.xlsx')
+            )
+        except Exception as e:
+            log.warning("Could not sync live signal tracker to Excel: %s", e)
+
         log.info("=== DONE in %.1f giây ===", time.perf_counter() - t0)
         return   # Không gửi email HTML
 
@@ -121,7 +151,20 @@ def run(dry_run: bool = False, send_test: bool = False, full_scan: bool = False)
     else:
         send_daily_alert(top10, dry_run=True)
 
+    try:
+        from track_signals import record_and_update_signals
+        from src.tracking.auto_updater import sync_to_excel
+        log.info("Updating live signal tracker...")
+        record_and_update_signals()
+        sync_to_excel(
+            csv_path=PROC_DIR / 'live_signal_tracker.csv',
+            xlsx_path=Path('journal/trade_log.xlsx')
+        )
+    except Exception as e:
+        log.warning("Could not sync live signal tracker to Excel: %s", e)
+
     log.info("=== DONE in %.1f giây ===", time.perf_counter() - t0)
+
 
 
 if __name__ == "__main__":

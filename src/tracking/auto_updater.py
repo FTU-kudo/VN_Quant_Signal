@@ -208,3 +208,230 @@ def format_weekly_telegram(metrics: dict) -> str:
         "📝 <i>Mở live_signal_tracker.csv",
         "để xem chi tiết từng lệnh</i>",
     ])
+
+
+def sync_to_excel(
+    csv_path: Path,
+    xlsx_path: Path,
+) -> None:
+    """
+    Sync live_signal_tracker.csv → journal/trade_log.xlsx.
+    Preserve cột 'note' do user nhập tay.
+
+    Parameters
+    ----------
+    csv_path  : Path đến live_signal_tracker.csv (source)
+    xlsx_path : Path đến journal/trade_log.xlsx (destination)
+    """
+    import pandas as pd
+
+    if not csv_path.exists():
+        print(f"⚠️  Không tìm thấy CSV source: {csv_path}")
+        return
+
+    # 1. Đọc dữ liệu mới nhất từ CSV (auto-detect delimiter ',', ';', '\t') hoặc parquet
+    try:
+        df_new = pd.read_csv(csv_path, sep=None, engine='python', encoding='utf-8-sig')
+    except Exception:
+        df_new = pd.DataFrame()
+
+    if 'signal_date' not in df_new.columns:
+        parquet_path = csv_path.with_suffix('.parquet')
+        if parquet_path.exists():
+            df_new = pd.read_parquet(parquet_path)
+
+    if df_new.empty or 'signal_date' not in df_new.columns:
+        print(f"⚠️  Không đọc được dữ liệu hợp lệ từ {csv_path}")
+        return
+
+    df_new['signal_date'] = pd.to_datetime(df_new['signal_date'])
+
+
+    # 2. Đọc notes hiện có từ xlsx (nếu file tồn tại)
+    existing_notes = {}
+    if xlsx_path.exists():
+        try:
+            df_old = pd.read_excel(xlsx_path, engine='openpyxl')
+            if 'signal_date' in df_old.columns:
+                df_old['signal_date'] = pd.to_datetime(
+                    df_old['signal_date']
+                )
+            # Key: (signal_date, ticker) → note
+            # Chỉ lưu các note không rỗng
+            for _, row in df_old.iterrows():
+                note = row.get('note', '')
+                if pd.notna(note) and str(note).strip():
+                    sig_dt = pd.to_datetime(row['signal_date']).date() if pd.notna(row.get('signal_date')) else str(row.get('signal_date'))
+                    key = (sig_dt, str(row.get('ticker', '')).strip())
+                    existing_notes[key] = str(note).strip()
+        except Exception as e:
+            print(f"⚠️  Không đọc được xlsx cũ: {e}")
+
+    # 3. Đảm bảo cột 'note' tồn tại trong df_new
+    if 'note' not in df_new.columns:
+        df_new['note'] = ''
+
+    # 4. Restore notes — không ghi đè nếu user đã điền
+    def restore_note(row):
+        sig_dt = pd.to_datetime(row['signal_date']).date() if pd.notna(row.get('signal_date')) else str(row.get('signal_date'))
+        key = (sig_dt, str(row.get('ticker', '')).strip())
+        # Ưu tiên note cũ của user
+        if key in existing_notes:
+            return existing_notes[key]
+        # Giữ nguyên note trong CSV nếu có
+        current = row.get('note', '')
+        if pd.notna(current) and str(current).strip():
+            return str(current).strip()
+        return ''
+
+    df_new['note'] = df_new.apply(restore_note, axis=1)
+
+    # 5. Sắp xếp: mới nhất lên đầu
+    df_new = df_new.sort_values(
+        ['signal_date', 'ticker'],
+        ascending=[False, True]
+    ).reset_index(drop=True)
+
+    # 6. Format cột số cho dễ đọc
+    currency_cols = [
+        'entry_price', 'STOP_LOSS', 'TARGET_1',
+        'TARGET_2', 'current_price', 'exit_price'
+    ]
+    for col in currency_cols:
+        if col in df_new.columns:
+            df_new[col] = pd.to_numeric(
+                df_new[col], errors='coerce'
+            )
+
+    pct_cols = ['return_pct']
+    for col in pct_cols:
+        if col in df_new.columns:
+            df_new[col] = pd.to_numeric(
+                df_new[col], errors='coerce'
+            )
+
+    # 7. Ghi ra xlsx với formatting
+    _write_xlsx(df_new, xlsx_path)
+    print(f"✅ trade_log.xlsx updated: {len(df_new)} signals")
+
+
+def _write_xlsx(df: pd.DataFrame, xlsx_path: Path) -> None:
+    """
+    Ghi DataFrame ra xlsx với conditional formatting.
+    WIN  → nền xanh lá  (#C6EFCE)
+    LOSS → nền đỏ nhạt  (#FFC7CE)
+    HOLDING → nền vàng  (#FFEB9C)
+    EXPIRED → nền xám   (#E0E0E0)
+    """
+    from openpyxl import Workbook
+    from openpyxl.styles import (
+        PatternFill, Font, Alignment
+    )
+    from openpyxl.utils import get_column_letter
+
+    # Màu sắc
+    COLOR_MAP = {
+        'WIN'    : 'C6EFCE',   # xanh lá nhạt
+        'LOSS'   : 'FFC7CE',   # đỏ nhạt
+        'HOLDING': 'FFEB9C',   # vàng nhạt
+        'EXPIRED': 'E0E0E0',   # xám nhạt
+    }
+    HEADER_COLOR = '1A237E'    # xanh đậm (giống email report)
+
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "Signal Tracker"
+
+    # ── Header row ──────────────────────────────────────────────
+    headers = list(df.columns)
+    for col_idx, header in enumerate(headers, 1):
+        cell = ws.cell(row=1, column=col_idx, value=header)
+        cell.font      = Font(
+            bold=True, color='FFFFFF', size=11
+        )
+        cell.fill      = PatternFill(
+            fill_type='solid', fgColor=HEADER_COLOR
+        )
+        cell.alignment = Alignment(
+            horizontal='center', vertical='center'
+        )
+
+    # ── Data rows ────────────────────────────────────────────────
+    for row_idx, row in enumerate(df.itertuples(index=False), 2):
+        result = str(getattr(row, 'result', '') or '')
+        bg_color = COLOR_MAP.get(result, 'FFFFFF')
+        fill = PatternFill(fill_type='solid', fgColor=bg_color)
+
+        for col_idx, value in enumerate(row, 1):
+            cell = ws.cell(row=row_idx, column=col_idx)
+
+            # Format giá trị
+            col_name = headers[col_idx - 1]
+
+            if col_name in ['entry_price', 'STOP_LOSS',
+                            'TARGET_1', 'TARGET_2',
+                            'current_price', 'exit_price']:
+                if pd.notna(value) and value != '':
+                    cell.value  = float(value)
+                    cell.number_format = '#,##0'
+                else:
+                    cell.value = ''
+
+            elif col_name == 'return_pct':
+                if pd.notna(value) and value != '':
+                    cell.value  = float(value) / 100
+                    cell.number_format = '0.00%'
+                else:
+                    cell.value = ''
+
+            elif col_name in ['signal_date',
+                              'last_updated', 'exit_date']:
+                cell.value = str(value)[:10] if pd.notna(value) \
+                             else ''
+
+            else:
+                cell.value = value if pd.notna(value) else ''
+
+            cell.fill      = fill
+            cell.alignment = Alignment(
+                horizontal='center', vertical='center',
+                wrap_text=(col_name == 'note')
+            )
+
+    # ── Column widths ────────────────────────────────────────────
+    col_widths = {
+        'signal_date'  : 14,
+        'ticker'       : 8,
+        'sector'       : 22,
+        'signals_fired': 20,
+        'score'        : 8,
+        'entry_price'  : 14,
+        'STOP_LOSS'    : 14,
+        'TARGET_1'     : 14,
+        'TARGET_2'     : 14,
+        'current_price': 14,
+        'return_pct'   : 12,
+        'status'       : 12,
+        'last_updated' : 14,
+        'result'       : 12,
+        'days_held'    : 12,
+        'exit_price'   : 14,
+        'exit_date'    : 14,
+        'note'         : 45,   # rộng hơn để ghi chú
+    }
+    for col_idx, col_name in enumerate(headers, 1):
+        width = col_widths.get(col_name, 14)
+        ws.column_dimensions[
+            get_column_letter(col_idx)
+        ].width = width
+
+    # ── Freeze header row ────────────────────────────────────────
+    ws.freeze_panes = 'A2'
+
+    # ── Auto filter ──────────────────────────────────────────────
+    ws.auto_filter.ref = ws.dimensions
+
+    # Đảm bảo thư mục tồn tại
+    xlsx_path.parent.mkdir(parents=True, exist_ok=True)
+    wb.save(xlsx_path)
+

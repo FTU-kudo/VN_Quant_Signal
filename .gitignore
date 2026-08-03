@@ -1,21 +1,42 @@
-# Secrets
-.env
+# ==============================================================================
+# .gitignore — vn-quant-signal (Security Hardened for Public GitHub Repo)
+# ==============================================================================
 
-# Large data files (store in cloud storage, not git)
+# ── 1. Secrets & Credentials (NEVER COMMIT) ─────────────────────────────────
+.env
+.env.*
+!.env.example
+*.key
+*.pem
+*.token
+
+# ── 2. Heavy Data & Local Databases ─────────────────────────────────────────
 data/
 logs/
+*.parquet
+*.sqlite
+*.db
 
-# Python
+# ── 3. Python Runtime & Virtual Environments ────────────────────────────────
 __pycache__/
 *.py[cod]
+*$py.class
+*.pyo
 *.egg-info/
 .venv/
 venv/
+env/
 dist/
 build/
 
-# IDE
+# ── 4. IDE / Editor Workspace Files ─────────────────────────────────────────
 .vscode/
 .idea/
 *.swp
+*.swo
+.DS_Store
+Thumbs.db
+
+# ── 5. Scratch & Personal Files ─────────────────────────────────────────────
 scratch/
+journal/
