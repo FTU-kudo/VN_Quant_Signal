@@ -81,6 +81,26 @@ logging.basicConfig(
 )
 log = logging.getLogger("ingestion")
 
+# Tắt toàn bộ các log rác, cảnh báo và quảng cáo từ vnstock / vnai
+logging.getLogger("vnstock").setLevel(logging.ERROR)
+logging.getLogger("vnstock.explorer.vci.quote").setLevel(logging.ERROR)
+logging.getLogger("vnstock.utils.logger").setLevel(logging.ERROR)
+logging.getLogger("vnstock.core.logger").setLevel(logging.ERROR)
+logging.getLogger("vnai").setLevel(logging.ERROR)
+logging.getLogger("vnai.beam.patching").setLevel(logging.ERROR)
+
+# Monkey-patch builtins.print để giấu khung quảng cáo VNSTOCK INSIDERS PROGRAM
+import builtins
+_original_print = builtins.print
+
+def _quiet_print(*args, **kwargs):
+    text = " ".join(str(a) for a in args)
+    if "VNSTOCK INSIDERS PROGRAM" in text or "vnstocks.com/insiders-program" in text or "Phiên bản cộng đồng" in text or "Tham gia ngay" in text or "Nếu bạn cảm thấy khó chịu" in text:
+        return
+    _original_print(*args, **kwargs)
+
+builtins.print = _quiet_print
+
 # ── Module-level rate limiter singleton ───────────────────────────────────────
 # Shared across all ThreadPoolExecutor worker threads — the Lock inside
 # SlidingWindowRateLimiter ensures correct serialization.
@@ -459,14 +479,13 @@ def run_ingestion(
                     "fetch_start": None, "fetch_end": None,
                 })
 
-            # Progress heartbeat every 50 tickers
-            if i % 50 == 0 or i == len(ticker_list):
-                n_done = sum(1 for r in results if r["status"] in
-                             {"full_load", "delta_updated", "up_to_date"})
-                log.info(
-                    "  Progress: %d / %d | ok=%d | failed=%d",
-                    i, len(ticker_list), n_done, len(failed_list),
-                )
+            # In log trực tiếp mã cổ phiếu đang được xử lý để người dùng tiện theo dõi
+            if result["status"] == "worker_exception" or result["status"] == "fetch_failed":
+                log.info("❌ [Lỗi] Quét thất bại: %-5s (%d/%d)", ticker, i, len(ticker_list))
+            elif result["status"] == "no_new_data":
+                log.info("⏭️ [Bỏ qua] Đã có dữ liệu mới nhất: %-5s (%d/%d)", ticker, i, len(ticker_list))
+            else:
+                log.info("✅ [Thành công] Quét xong: %-5s (%d/%d)", ticker, i, len(ticker_list))
 
     # ── Build summary DataFrame ───────────────────────────────────────────────
     results_df = pd.DataFrame(results)
