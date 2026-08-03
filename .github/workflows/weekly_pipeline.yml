@@ -1,0 +1,34 @@
+name: VN Quant Weekly Review
+
+on:
+  schedule:
+    # 09:30 UTC = 16:30 giờ Việt Nam (UTC+7) vào mỗi Thứ 6
+    - cron: '30 9 * * 5'
+  workflow_dispatch: # Cho phép kích hoạt thủ công
+
+jobs:
+  run-weekly-review:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Install Dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Execute Weekly Review & Send Alerts
+        env:
+          VNSTOCK_API_KEY: ${{ secrets.VNSTOCK_API_KEY }}
+          TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: |
+          python run_weekly_review.py
