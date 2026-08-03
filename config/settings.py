@@ -142,10 +142,10 @@ LIQUIDITY_LOOKBACK      = 60              # market days for continuity check
 #   SMTP_PASS=app_password_here
 #   REPORT_RECIPIENTS=analyst@yuanta.com,risk@yuanta.com
 
-SMTP_HOST          = os.getenv("SMTP_HOST", "smtp.gmail.com")
-SMTP_PORT          = int(os.getenv("SMTP_PORT", "587"))
-SMTP_USER          = os.getenv("SMTP_USER", "")
-SMTP_PASS          = os.getenv("SMTP_PASS", "")
+SMTP_HOST          = os.getenv("SMTP_HOST") or "smtp.gmail.com"
+SMTP_PORT          = int(os.getenv("SMTP_PORT") or "587")
+SMTP_USER          = os.getenv("SMTP_USER") or ""
+SMTP_PASS          = os.getenv("SMTP_PASS") or ""
 REPORT_RECIPIENTS  = [
     r.strip()
     for r in os.getenv("REPORT_RECIPIENTS", "").split(",")
